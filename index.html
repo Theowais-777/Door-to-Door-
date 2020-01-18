@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Door to Door — Intelligent Arrival Concierge & Safe Travel Platform</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React & Babel -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .glass-card { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function App() {
+      const [city, setCity] = useState("SXR");
+      const [destination, setDestination] = useState("Dal Lake / Boulevard Road");
+      const [flightNo, setFlightNo] = useState("6E-554 (Delhi -> Srinagar)");
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [bookingModal, setBookingModal] = useState(null);
+      const [bookingForm, setBookingForm] = useState({ name: "Owais Khan", phone: "+91 90189 13331", date: "2026-11-05", nights: 2 });
+      const [bookingSuccess, setBookingSuccess] = useState(null);
+
+      const fetchBrief = async () => {
+        setLoading(true);
+        try {
+          const res = await fetch("/api/v1/concierge/arrival-brief", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              airport_code: city,
+              flight_number: flightNo,
+              destination_area: destination
+            })
+          });
+          const json = await res.json();
+          setData(json);
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        fetchBrief();
+      }, [city, destination]);
+
+      const handleBook = async (e) => {
+        e.preventDefault();
+        try {
+          const res = await fetch("/api/v1/bookings/rooms", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              hotel_id: bookingModal.id,
+              guest_name: bookingForm.name,
+              guest_phone: bookingForm.phone,
+              check_in: bookingForm.date,
+              nights: parseInt(bookingForm.nights)
+            })
+          });
+          const json = await res.json();
+          setBookingSuccess(json);
+          setBookingModal(null);
+        } catch (err) {
+          alert("Booking error");
+        }
+      };
+
+      return (
+        <div className="pb-16">
+          {/* Header */}
+          <header className="border-b border-slate-800 bg-slate-950/80 sticky top-0 z-40 backdrop-blur-md px-6 py-4 flex flex-wrap justify-between items-center">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center font-extrabold text-slate-950 text-xl shadow-lg shadow-teal-500/20">
+                D2D
+              </div>
+              <div>
+                <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                  Door to Door <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">Tourist Shield AI</span>
+                </h1>
+                <p className="text-xs text-slate-400">Contextual Airport Arrival Guide & Anti-Fraud Transit Platform</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 mt-3 sm:mt-0">
+              <span className="flex h-3 w-3 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+              </span>
+              <span className="text-xs font-semibold text-emerald-400 bg-emerald-950/50 px-3 py-1 rounded-full border border-emerald-800">
+                Live Flight Radar Active
+              </span>
+            </div>
+          </header>
+
+          {/* Hero Context Flight Deck */}
+          <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-8 space-y-8">
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-900/60 via-indigo-900/50 to-slate-900 border border-slate-800 p-6 sm:p-8 shadow-2xl">
+              <div className="relative z-10 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+                <div className="md:col-span-2 space-y-3">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 text-xs font-semibold uppercase tracking-wider">
+                    ✈️ Touchdown Detection Simulation
+                  </div>
+                  <h2 className="text-2xl sm:text-3xl font-extrabold text-white">
+                    Just Landed at {data ? data.airport : "Srinagar Airport (SXR)"}
+                  </h2>
+                  <p className="text-sm text-slate-300 max-w-xl">
+                    Our real-time guide monitors arrival terminal gates, benchmarks government taxi counters against surge scams, and ensures you reach your hotel securely.
+                  </p>
+                  {data && (
+                    <div className="inline-block mt-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-2">
+                      <span className="text-xs text-slate-400">Guaranteed Tourist Protection Savings:</span>
+                      <p className="text-lg font-bold text-emerald-400">Save up to {data.potential_fraud_savings} on airport transfers</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-slate-950/70 p-5 rounded-2xl border border-slate-800 space-y-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-400 uppercase">Tracked Arrival Hub</label>
+                    <select 
+                      value={city} 
+                      onChange={(e) => setCity(e.target.value)}
+                      className="w-full mt-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-medium focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="SXR">Srinagar (SXR) — Sheikh ul-Alam Intl</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-400 uppercase">Target Destination</label>
+                    <select 
+                      value={destination} 
+                      onChange={(e) => setDestination(e.target.value)}
+                      className="w-full mt-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-medium focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="Dal Lake / Boulevard Road">Dal Lake / Boulevard Road (Houseboats)</option>
+                      <option value="Gulmarg Hill Resort">Gulmarg Hill Resort (Winter Skiing)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Anti-Fraud Advisories (Tourist Shield) */}
+            <section className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                  🛡️ Active Airport & City Anti-Fraud Advisories
+                </h3>
+                <span className="text-xs text-amber-400 bg-amber-950/40 border border-amber-800 px-3 py-1 rounded-full font-semibold">
+                  Tourist Police Verified
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                {data?.anti_fraud_advisories?.map((rule) => (
+                  <div key={rule.id} className="bg-slate-950 border border-amber-500/20 rounded-2xl p-5 space-y-3 relative overflow-hidden shadow-lg">
+                    <div className="w-1.5 h-full bg-amber-500 absolute left-0 top-0"></div>
+                    <div className="flex justify-between items-start">
+                      <span className="text-xs font-bold uppercase text-amber-400 tracking-wider">Scam Alert</span>
+                      <span className="text-xs text-slate-400">SOS: 112</span>
+                    </div>
+                    <h4 className="font-bold text-white text-base">{rule.scam_title}</h4>
+                    <p className="text-xs text-slate-300 leading-relaxed">{rule.description}</p>
+                    <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 text-xs text-emerald-300 font-medium">
+                      <span className="font-bold text-emerald-400 block mb-1">✅ Safe Action:</span>
+                      {rule.prevention_guide}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* Fair-Fare Transit Benchmark Engine */}
+            <section className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    🚖 Real-Time Transit & Cab Benchmark
+                  </h3>
+                  <p className="text-xs text-slate-400">Comparing regulated rates against surge & predatory tout pricing</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                {data?.transit_comparison?.map((option) => (
+                  <div 
+                    key={option.id} 
+                    className={`rounded-2xl p-5 border relative flex flex-col justify-between ${
+                      option.recommended 
+                        ? 'bg-slate-950 border-emerald-500/40 shadow-xl shadow-emerald-500/5 ring-1 ring-emerald-500/20' 
+                        : 'bg-red-950/20 border-red-500/30'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
+                          option.recommended 
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
+                            : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                        }`}>
+                          {option.recommended ? "★ RECOMMENDED SAFE OPTION" : "⚠️ HIGH SCAM RISK"}
+                        </span>
+                        <span className="text-xs text-slate-400">{option.travel_time_mins} mins</span>
+                      </div>
+                      
+                      <h4 className="font-bold text-lg text-white mt-1">{option.title}</h4>
+                      <div className="mt-3 flex items-baseline gap-2">
+                        <span className="text-2xl font-black text-white">₹{option.estimated_price_min} - ₹{option.estimated_price_max}</span>
+                        <span className="text-xs text-slate-400">fair fare estimate</span>
+                      </div>
+                      <p className="text-xs text-slate-300 mt-3 p-3 bg-slate-900 rounded-xl border border-slate-800">
+                        {option.advice}
+                      </p>
+                    </div>
+
+                    <div className="mt-5 pt-4 border-t border-slate-800 flex justify-between items-center text-xs">
+                      <span className="text-slate-400">Safety Rating: <strong className="text-amber-400 font-bold">★ {option.safety_rating}</strong></span>
+                      <button 
+                        onClick={() => alert(`Directions: Head towards ${option.title.includes('Prepaid') ? 'Arrival Hall Counter #2' : 'Designated Cab Bay'}`)}
+                        className={`px-4 py-2 rounded-xl font-bold transition-all ${
+                          option.recommended 
+                            ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950' 
+                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                        }`}
+                      >
+                        {option.recommended ? "Choose Safe Ride" : "Avoid"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* Curated Accommodations & Room Allocation */}
+            <section className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    🏨 Verified Accommodations & Direct Room Allocation
+                  </h3>
+                  <p className="text-xs text-slate-400">All properties pre-verified for tourist safety, lake access, and direct reception check-in</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+                {data?.recommended_hotels?.map((hotel) => (
+                  <div key={hotel.id} className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-between hover:border-slate-700 transition-all shadow-lg group">
+                    <div>
+                      <div className="h-44 overflow-hidden relative">
+                        <img src={hotel.image_url} alt={hotel.name} className="w-full h-full object-cover group-hover:scale-105 transition-all duration-300" />
+                        <div className="absolute top-3 right-3 bg-slate-950/80 backdrop-blur-md px-2 py-1 rounded-lg text-xs font-bold text-amber-400 border border-slate-700">
+                          ★ {hotel.rating}
+                        </div>
+                        <div className="absolute bottom-3 left-3 bg-emerald-500/90 text-slate-950 text-[10px] font-black uppercase px-2 py-0.5 rounded shadow">
+                          Verified Safe Property
+                        </div>
+                      </div>
+                      
+                      <div className="p-4 space-y-2">
+                        <span className="text-[11px] font-semibold text-teal-400 uppercase tracking-wider">{hotel.category}</span>
+                        <h4 className="font-bold text-base text-white line-clamp-1">{hotel.name}</h4>
+                        <p className="text-xs text-slate-400 line-clamp-1">{hotel.locality}</p>
+                        <p className="text-[11px] text-slate-500 mt-2 line-clamp-2">{hotel.amenities}</p>
+                      </div>
+                    </div>
+
+                    <div className="p-4 pt-0 mt-3 flex justify-between items-center border-t border-slate-900">
+                      <div>
+                        <span className="text-lg font-black text-white">₹{hotel.price_per_night.toLocaleString()}</span>
+                        <span className="text-[10px] text-slate-400 block">/ night</span>
+                      </div>
+                      <button 
+                        onClick={() => setBookingModal(hotel)}
+                        className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-all shadow-lg shadow-blue-600/20"
+                      >
+                        Book Room
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </main>
+
+          {/* Booking Modal */}
+          {bookingModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+              <div className="bg-slate-950 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                  <h3 className="font-bold text-lg text-white">Confirm Room Allocation</h3>
+                  <button onClick={() => setBookingModal(null)} className="text-slate-400 hover:text-white font-bold">&times;</button>
+                </div>
+                
+                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800">
+                  <span className="text-xs text-teal-400 font-semibold">{bookingModal.category}</span>
+                  <h4 className="font-bold text-white text-base">{bookingModal.name}</h4>
+                  <p className="text-xs text-slate-400">{bookingModal.locality}</p>
+                  <p className="text-sm font-bold text-emerald-400 mt-1">₹{bookingModal.price_per_night.toLocaleString()} / night</p>
+                </div>
+
+                <form onSubmit={handleBook} className="space-y-3">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-400">Guest Name</label>
+                    <input 
+                      type="text" 
+                      required 
+                      value={bookingForm.name} 
+                      onChange={(e) => setBookingForm({...bookingForm, name: e.target.value})}
+                      className="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500" 
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-400">Contact Number</label>
+                    <input 
+                      type="tel" 
+                      required 
+                      value={bookingForm.phone} 
+                      onChange={(e) => setBookingForm({...bookingForm, phone: e.target.value})}
+                      className="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500" 
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-semibold text-slate-400">Check-in Date</label>
+                      <input 
+                        type="date" 
+                        required 
+                        value={bookingForm.date} 
+                        onChange={(e) => setBookingForm({...bookingForm, date: e.target.value})}
+                        className="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500" 
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-400">Nights</label>
+                      <input 
+                        type="number" 
+                        min="1" 
+                        max="14" 
+                        required 
+                        value={bookingForm.nights} 
+                        onChange={(e) => setBookingForm({...bookingForm, nights: e.target.value})}
+                        className="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500" 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-2">
+                    <button type="submit" className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-extrabold text-sm transition-all shadow-lg shadow-emerald-500/20">
+                      Allocate & Confirm Booking
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Success Modal */}
+          {bookingSuccess && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+              <div className="bg-slate-950 border border-emerald-500/40 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl text-center">
+                <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto text-3xl">
+                  ✓
+                </div>
+                <h3 className="text-xl font-bold text-white">Room Allocation Confirmed!</h3>
+                <p className="text-xs text-slate-300">
+                  Your reservation ID is <strong className="text-emerald-400 font-mono text-sm">{bookingSuccess.booking_id}</strong>
+                </p>
+                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 text-left text-xs space-y-1.5">
+                  <div className="flex justify-between"><span className="text-slate-400">Hotel:</span> <strong className="text-white">{bookingSuccess.hotel_name}</strong></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Allocated Room:</span> <strong className="text-emerald-400 font-bold">{bookingSuccess.allocated_room_no}</strong></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Guest:</span> <strong className="text-white">{bookingSuccess.guest_name}</strong></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Total Billed:</span> <strong className="text-white">{bookingSuccess.total_amount}</strong></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Assurance:</span> <span className="text-teal-400 font-medium">Direct Front Desk Sync</span></div>
+                </div>
+                <button 
+                  onClick={() => setBookingSuccess(null)}
+                  className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
