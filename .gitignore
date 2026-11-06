@@ -3,6 +3,8 @@ __pycache__/
 *.pyo
 *.pyd
 .env
+infra/.env
 doortodoor.db
 .vscode/
 .idea/
+

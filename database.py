@@ -58,10 +58,22 @@ class Hotel(Base):
     amenities = Column(String(300))
     verified_badge = Column(Boolean, default=True)
 
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    google_id = Column(String(100), unique=True, index=True, nullable=True)
+    email = Column(String(150), unique=True, index=True, nullable=False)
+    name = Column(String(150), nullable=False)
+    picture = Column(String(500), nullable=True)
+    provider = Column(String(50), default="google") # "google", "local"
+    role = Column(String(20), default="tourist") # "tourist", "verified_driver", "admin"
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class RoomBooking(Base):
     __tablename__ = "room_bookings"
     id = Column(Integer, primary_key=True, index=True)
     hotel_id = Column(Integer, nullable=False)
+    user_id = Column(Integer, nullable=True)
     guest_name = Column(String(100), nullable=False)
     guest_phone = Column(String(30), nullable=False)
     check_in = Column(String(30), nullable=False)
@@ -78,7 +90,7 @@ def init_db():
     # Seed Srinagar if not present
     if not db.query(City).filter(City.airport_code == "SXR").first():
         srinagar = City(
-            name="Srinagar",
+            name="Srinagar & Kashmir Valley",
             state="Jammu and Kashmir",
             country="India",
             airport_code="SXR",
@@ -99,6 +111,14 @@ def init_db():
                 description="Unregistered drivers linger outside arrival doors claiming app-cabs/taxis are not available and demand ₹2,500 - ₹3,500 for Dal Lake.",
                 prevention_guide="Always walk directly to the official J&K Tourism / Traffic Police Prepaid Taxi Booth right inside the terminal gate. The government regulated fare to Boulevard/Dal Lake is fixed around ₹800 - ₹950.",
                 official_helpline="Tourist Police Srinagar: +91-194-2452224 / 112"
+            ),
+            AntiFraudRule(
+                city_id=srinagar.id,
+                scam_title="Offbeat Valley Touts (Arizal, Sukhnag, Doodhpathri)",
+                scam_category="valley_tout",
+                description="Unregulated agents at highway crossings claim high-altitude roads to Doodhpathri, Arizal, or Tosamaidan are blocked and force private overpriced escorts.",
+                prevention_guide="Verify live transit via official H3 route benchmarks or Tourist Reception Centre Srinagar. Local 4x4 and registered union cabs have fixed rate slips.",
+                official_helpline="Budgam District Control: +91-1951-255203 / 112"
             ),
             AntiFraudRule(
                 city_id=srinagar.id,
@@ -176,6 +196,34 @@ def init_db():
                 safety_rating=4.8,
                 fraud_risk_level="LOW",
                 advice="In winter, chained vehicles are arranged from Tangmarg. Official taxi union rate applies."
+            ),
+            TransitOption(
+                city_id=srinagar.id,
+                origin="Srinagar Airport (SXR)",
+                destination="Doodhpathri (Valley of Milk)",
+                transit_mode="prepaid_taxi",
+                title="Official Taxi to Doodhpathri Meadow",
+                estimated_price_min=1800,
+                estimated_price_max=2200,
+                travel_time_mins=70,
+                recommended=True,
+                safety_rating=4.8,
+                fraud_risk_level="LOW",
+                advice="Scenic drive via Khansahib. Pre-fixed rate through Budgam taxi union."
+            ),
+            TransitOption(
+                city_id=srinagar.id,
+                origin="Srinagar Airport (SXR)",
+                destination="Arizal & Sukhnag Cascades",
+                transit_mode="prepaid_taxi",
+                title="Direct Cab to Arizal / Sukhnag Waterfalls",
+                estimated_price_min=1700,
+                estimated_price_max=2100,
+                travel_time_mins=65,
+                recommended=True,
+                safety_rating=4.7,
+                fraud_risk_level="LOW",
+                advice="Follow Beerwah-Khag route. Excellent camping and trout angling trail."
             )
         ]
         db.add_all(transit)
@@ -230,3 +278,4 @@ def init_db():
         db.add_all(hotels)
         db.commit()
     db.close()
+

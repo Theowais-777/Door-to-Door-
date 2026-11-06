@@ -3,62 +3,397 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Door to Door — Intelligent Arrival Concierge & Safe Travel Platform</title>
+  <title>Door to Door — Kashmir Valley Transit, Uber H3 Spatial Map & Anti-Fraud Concierge</title>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <!-- React & Babel -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
-    .glass-card { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); }
+    #map-container { height: 600px; width: 100%; border-radius: 1rem; z-index: 10; }
+    .leaflet-popup-content-wrapper { background: #0f172a; color: #f8fafc; border: 1px solid #334155; border-radius: 0.75rem; }
+    .leaflet-popup-tip { background: #0f172a; }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.4); opacity: 0.2; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .vehicle-pulse {
+      animation: pulse-ring 1.6s cubic-bezier(0.455, 0.03, 0.515, 0.955) infinite;
+    }
   </style>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-screen">
+<body class="bg-slate-950 text-slate-100 min-h-screen">
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useRef } = React;
+
+    const TRANSPORT_MODES = [
+      { id: "two_wheeler", label: "Two Wheeler", desc: "Scooter / Royal Enfield", icon: "🏍️", badge: "Agile & Fast" },
+      { id: "car", label: "Car (Sedan/Hatch)", desc: "Swift / Etios (1-4 pax)", icon: "🚗", badge: "Standard" },
+      { id: "xl_car", label: "XL Car (4x4 SUV)", desc: "Innova / Scorpio / 4x4", icon: "🚙", badge: "Mountain Ready" },
+      { id: "bus", label: "Bus / Coach", desc: "JKSRTC E-Bus & Coaches", icon: "🚌", badge: "Eco / Budget" }
+    ];
+
+    const MAP_LAYERS = {
+      streets: {
+        name: "Roads & Streets (OSM)",
+        url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        attrib: '&copy; OpenStreetMap contributors'
+      },
+      voyager: {
+        name: "CartoDB Detailed",
+        url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+        attrib: '&copy; CARTO | OSM'
+      },
+      topo: {
+        name: "Topography / Mountains",
+        url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+        attrib: '&copy; OpenTopoMap'
+      }
+    };
 
     function App() {
-      const [city, setCity] = useState("SXR");
-      const [destination, setDestination] = useState("Dal Lake / Boulevard Road");
-      const [flightNo, setFlightNo] = useState("6E-554 (Delhi -> Srinagar)");
-      const [data, setData] = useState(null);
-      const [loading, setLoading] = useState(false);
+      const [locations, setLocations] = useState([]);
+      const [originId, setOriginId] = useState("srinagar_airport");
+      const [destId, setDestId] = useState("gulmarg");
+      const [selectedMode, setSelectedMode] = useState("car");
+      
+      // H3 Core Library features (https://h3geo.org/docs/core-library/usage/)
+      const [showNeighbors, setShowNeighbors] = useState(true);
+      const [neighborRing, setNeighborRing] = useState(1); // k=1 (6 neighbors) or k=2 (18 neighbors)
+      const [neighborData, setNeighborData] = useState(null);
+      const [mapStyle, setMapStyle] = useState("voyager");
+
+      // Route calculations & live tracing
+      const [routeData, setRouteData] = useState(null);
+      const [isTracing, setIsTracing] = useState(false);
+      const [traceProgress, setTraceProgress] = useState(0);
+      const [traceStatus, setTraceStatus] = useState("");
+
+      // Arrival brief & hotels
+      const [arrivalBrief, setArrivalBrief] = useState(null);
       const [bookingModal, setBookingModal] = useState(null);
-      const [bookingForm, setBookingForm] = useState({ name: "Owais Khan", phone: "+91 90189 13331", date: "2026-11-05", nights: 2 });
+      const [bookingForm, setBookingForm] = useState({ name: "Tawheeda Jan", phone: "+91 94190 12345", date: "2026-11-06", nights: 2 });
       const [bookingSuccess, setBookingSuccess] = useState(null);
 
-      const fetchBrief = async () => {
-        setLoading(true);
+      // Map reference & overlays
+      const mapRef = useRef(null);
+      const tileLayerRef = useRef(null);
+      const markersLayerRef = useRef(null);
+      const hexLayerRef = useRef(null);
+      const neighborHexLayerRef = useRef(null);
+      const routePolylineRef = useRef(null);
+      const vehicleMarkerRef = useRef(null);
+
+      // Load locations from gRPC backend on startup
+      useEffect(() => {
+        fetch("/api/v1/transit/locations")
+          .then(res => res.json())
+          .then(data => {
+            setLocations(data);
+          })
+          .catch(err => console.error("Error fetching gRPC locations:", err));
+
+        // Load arrival brief
+        fetch("/api/v1/concierge/arrival-brief", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            airport_code: "SXR",
+            flight_number: "6E-554",
+            destination_area: "Dal Lake / Boulevard Road"
+          })
+        })
+        .then(res => res.json())
+        .then(data => setArrivalBrief(data))
+        .catch(err => console.error(err));
+      }, []);
+
+      // Initialize Leaflet Map
+      useEffect(() => {
+        if (!mapRef.current && document.getElementById("map-container")) {
+          const map = L.map("map-container", {
+            center: [34.0200, 74.7500],
+            zoom: 10,
+            zoomControl: true
+          });
+
+          const currentLayerConfig = MAP_LAYERS[mapStyle];
+          tileLayerRef.current = L.tileLayer(currentLayerConfig.url, {
+            attribution: currentLayerConfig.attrib,
+            maxZoom: 18
+          }).addTo(map);
+
+          neighborHexLayerRef.current = L.layerGroup().addTo(map);
+          hexLayerRef.current = L.layerGroup().addTo(map);
+          markersLayerRef.current = L.layerGroup().addTo(map);
+
+          mapRef.current = map;
+        }
+      }, []);
+
+      // Handle map basemap layer switcher (Roads & Streets / Voyager / Topo)
+      useEffect(() => {
+        if (!mapRef.current || !tileLayerRef.current) return;
+        const currentLayerConfig = MAP_LAYERS[mapStyle];
+        mapRef.current.removeLayer(tileLayerRef.current);
+        tileLayerRef.current = L.tileLayer(currentLayerConfig.url, {
+          attribution: currentLayerConfig.attrib,
+          maxZoom: 18
+        }).addTo(mapRef.current);
+      }, [mapStyle]);
+
+      // Fetch Uber H3 Neighbor Cells (gridDisk / kRing) via gRPC
+      const fetchNeighborHexagons = async (targetId, ringK) => {
         try {
-          const res = await fetch("/api/v1/concierge/arrival-brief", {
+          const res = await fetch("/api/v1/transit/neighbors", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              airport_code: city,
-              flight_number: flightNo,
-              destination_area: destination
+              location_id: targetId,
+              ring_size: ringK
             })
           });
-          const json = await res.json();
-          setData(json);
+          const data = await res.json();
+          setNeighborData(data);
+
+          if (neighborHexLayerRef.current) {
+            neighborHexLayerRef.current.clearLayers();
+            if (showNeighbors && data.cells) {
+              data.cells.forEach(c => {
+                const isCenter = c.is_center;
+                const hexPoly = L.polygon(c.boundary, {
+                  color: isCenter ? "#10b981" : "#06b6d4",
+                  weight: isCenter ? 2.5 : 1.2,
+                  fillColor: isCenter ? "#10b981" : "#0891b2",
+                  fillOpacity: isCenter ? 0.3 : 0.12,
+                  dashArray: isCenter ? null : "3, 4"
+                });
+                hexPoly.bindTooltip(`
+                  <div style="font-size: 11px;">
+                    <b style="color: ${isCenter ? '#34d399' : '#38bdf8'}">${c.zone_name}</b><br/>
+                    <b>H3 Cell:</b> <code style="color: #cbd5e1;">${c.h3_cell}</code><br/>
+                    <b>Ring Distance k:</b> ${c.ring_distance}<br/>
+                    <b>Center:</b> [${c.center_lat.toFixed(4)}, ${c.center_lng.toFixed(4)}]
+                  </div>
+                `, { sticky: true });
+                neighborHexLayerRef.current.addLayer(hexPoly);
+              });
+            }
+          }
         } catch (err) {
-          console.error(err);
-        } finally {
-          setLoading(false);
+          console.error("Failed to load neighboring hexagons:", err);
+        }
+      };
+
+      // Re-fetch neighbors when destination or ring size changes
+      useEffect(() => {
+        if (destId) {
+          fetchNeighborHexagons(destId, neighborRing);
+        }
+      }, [destId, neighborRing, showNeighbors]);
+
+      // Render Locations and H3 Base Hexagons on map
+      useEffect(() => {
+        if (!mapRef.current || locations.length === 0) return;
+
+        markersLayerRef.current.clearLayers();
+        hexLayerRef.current.clearLayers();
+
+        locations.forEach(loc => {
+          const isOrigin = loc.id === originId;
+          const isDest = loc.id === destId;
+
+          // Uber H3 Hexagonal boundary polygon
+          if (loc.cell_boundary && loc.cell_boundary.length > 0) {
+            const hexPolygon = L.polygon(loc.cell_boundary, {
+              color: isOrigin ? "#10b981" : (isDest ? "#f59e0b" : "#6366f1"),
+              weight: isOrigin || isDest ? 3 : 1.5,
+              fillColor: isOrigin ? "#10b981" : (isDest ? "#f59e0b" : "#818cf8"),
+              fillOpacity: isOrigin || isDest ? 0.35 : 0.14,
+              dashArray: isOrigin || isDest ? null : "4, 4"
+            });
+            hexPolygon.bindTooltip(`<b>H3 Cell:</b> ${loc.h3_cell}<br/><b>${loc.name}</b>`, { sticky: true });
+            hexPolygon.on('click', () => {
+              setDestId(loc.id);
+            });
+            hexLayerRef.current.addLayer(hexPolygon);
+          }
+
+          // Custom Marker Icon
+          const markerHtml = `
+            <div style="background: ${isOrigin ? '#10b981' : (isDest ? '#f59e0b' : '#1e293b')}; color: white; border: 2px solid ${isOrigin ? '#34d399' : (isDest ? '#fbbf24' : '#64748b')}; padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.5); cursor: pointer; display: flex; align-items: center; gap: 4px;">
+              <span>${isOrigin ? '🛫' : (isDest ? '🎯' : '📍')}</span>
+              <span>${loc.name.split('(')[0].trim()}</span>
+            </div>
+          `;
+
+          const customIcon = L.divIcon({
+            html: markerHtml,
+            className: 'custom-map-pin',
+            iconSize: [120, 28],
+            iconAnchor: [60, 14]
+          });
+
+          const marker = L.marker([loc.lat, loc.lng], { icon: customIcon });
+          marker.bindPopup(`
+            <div style="font-family: inherit;">
+              <div style="font-size: 10px; color: #38bdf8; font-weight: 700; text-transform: uppercase;">${loc.category}</div>
+              <div style="font-size: 15px; font-weight: 800; margin: 2px 0 6px 0;">${loc.name}</div>
+              <div style="font-size: 12px; color: #cbd5e1; margin-bottom: 8px;">${loc.description}</div>
+              <div style="font-size: 11px; color: #94a3b8; background: #1e293b; padding: 6px; border-radius: 6px; margin-bottom: 8px;">
+                <b>Uber H3 Cell:</b> <code style="color: #a78bfa;">${loc.h3_cell}</code><br/>
+                <b>Key Sights:</b> ${loc.highlights}
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <button onclick="window.selectAsOrigin('${loc.id}')" style="background: #10b981; color: #022c22; font-weight: bold; font-size: 11px; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">Set as Origin</button>
+                <button onclick="window.selectAsDest('${loc.id}')" style="background: #f59e0b; color: #451a03; font-weight: bold; font-size: 11px; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">Set Destination</button>
+              </div>
+            </div>
+          `);
+          markersLayerRef.current.addLayer(marker);
+        });
+
+      }, [locations, originId, destId]);
+
+      // Global window helpers for leaflet popup buttons
+      useEffect(() => {
+        window.selectAsOrigin = (id) => setOriginId(id);
+        window.selectAsDest = (id) => setDestId(id);
+      }, []);
+
+      // Calculate route via gRPC when origin, destination or mode changes
+      const calculateRoute = async () => {
+        if (!originId || !destId) return;
+        try {
+          const res = await fetch("/api/v1/transit/calculate-route", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              origin_id: originId,
+              destination_id: destId,
+              transport_mode: selectedMode
+            })
+          });
+          const data = await res.json();
+          setRouteData(data);
+
+          // Update polyline on map
+          if (mapRef.current && data.path) {
+            if (routePolylineRef.current) {
+              mapRef.current.removeLayer(routePolylineRef.current);
+            }
+
+            const polyline = L.polyline(data.path, {
+              color: "#38bdf8",
+              weight: 5,
+              opacity: 0.85,
+              dashArray: "1, 8"
+            }).addTo(mapRef.current);
+
+            routePolylineRef.current = polyline;
+            mapRef.current.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+
+            // Render traversed H3 Hexagons along the route
+            if (data.h3_polygons) {
+              data.h3_polygons.forEach(hp => {
+                const hPoly = L.polygon(hp.boundary, {
+                  color: "#a855f7",
+                  weight: 1.5,
+                  fillColor: "#c084fc",
+                  fillOpacity: 0.15,
+                  dashArray: "3, 3"
+                });
+                hPoly.bindTooltip(`Traversing H3 Cell: ${hp.h3_cell}`, { sticky: true });
+                hexLayerRef.current.addLayer(hPoly);
+              });
+            }
+          }
+        } catch (err) {
+          console.error("Failed to calculate gRPC route:", err);
         }
       };
 
       useEffect(() => {
-        fetchBrief();
-      }, [city, destination]);
+        calculateRoute();
+      }, [originId, destId, selectedMode]);
 
+      // Trigger Live Vehicle Tracing via gRPC Stream
+      const startLiveTracing = async () => {
+        if (isTracing) return;
+        setIsTracing(true);
+        setTraceProgress(0);
+        setTraceStatus("Connecting to gRPC streaming telemetry...");
+
+        try {
+          const res = await fetch("/api/v1/transit/live-trace", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              origin_id: originId,
+              destination_id: destId,
+              transport_mode: selectedMode
+            })
+          });
+          const { steps } = await res.json();
+
+          let currentStep = 0;
+          const interval = setInterval(() => {
+            if (currentStep >= steps.length) {
+              clearInterval(interval);
+              setIsTracing(false);
+              setTraceStatus("Completed touchdown at destination!");
+              return;
+            }
+
+            const step = steps[currentStep];
+            setTraceProgress(step.progress_percentage);
+            setTraceStatus(step.status_message);
+
+            // Update Vehicle icon on map
+            if (mapRef.current) {
+              if (vehicleMarkerRef.current) {
+                mapRef.current.removeLayer(vehicleMarkerRef.current);
+              }
+
+              const vehicleIconHtml = `
+                <div style="position: relative; width: 44px; height: 44px; display: flex; items-center; justify-content: center;">
+                  <div class="vehicle-pulse" style="position: absolute; width: 100%; height: 100%; border-radius: 50%; background: #38bdf8;"></div>
+                  <div style="position: relative; z-index: 2; width: 34px; height: 34px; background: #0f172a; border: 2px solid #38bdf8; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: 0 0 15px #38bdf8;">
+                    ${selectedMode === 'two_wheeler' ? '🏍️' : (selectedMode === 'car' ? '🚗' : (selectedMode === 'xl_car' ? '🚙' : '🚌'))}
+                  </div>
+                </div>
+              `;
+
+              const vIcon = L.divIcon({
+                html: vehicleIconHtml,
+                className: 'live-vehicle-marker',
+                iconSize: [44, 44],
+                iconAnchor: [22, 22]
+              });
+
+              vehicleMarkerRef.current = L.marker([step.lat, step.lng], { icon: vIcon }).addTo(mapRef.current);
+              mapRef.current.panTo([step.lat, step.lng], { animate: true, duration: 0.3 });
+            }
+
+            currentStep++;
+          }, 350);
+
+        } catch (err) {
+          console.error("Live tracing error:", err);
+          setIsTracing(false);
+        }
+      };
+
+      // Room Booking handler
       const handleBook = async (e) => {
         e.preventDefault();
         try {
@@ -77,317 +412,446 @@
           setBookingSuccess(json);
           setBookingModal(null);
         } catch (err) {
-          alert("Booking error");
+          alert("Booking error: " + err);
         }
       };
 
+      const selectedOption = routeData?.options?.find(o => o.mode === selectedMode) || routeData?.options?.[0];
+
       return (
-        <div className="pb-16">
-          {/* Header */}
-          <header className="border-b border-slate-800 bg-slate-950/80 sticky top-0 z-40 backdrop-blur-md px-6 py-4 flex flex-wrap justify-between items-center">
+        <div className="pb-24">
+          {/* Top Header */}
+          <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-50 px-6 py-4 flex flex-wrap justify-between items-center">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center font-extrabold text-slate-950 text-xl shadow-lg shadow-teal-500/20">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center font-black text-slate-950 text-xl shadow-lg shadow-emerald-500/20">
                 D2D
               </div>
               <div>
-                <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-                  Door to Door <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">Tourist Shield AI</span>
+                <h1 className="text-xl font-extrabold tracking-tight text-white flex items-center gap-2">
+                  Door to Door <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">Uber H3 Core Library Grid</span>
                 </h1>
-                <p className="text-xs text-slate-400">Contextual Airport Arrival Guide & Anti-Fraud Transit Platform</p>
+                <p className="text-xs text-slate-400">gRPC Multi-Modal Transit Engine & Anti-Fraud Shield</p>
               </div>
             </div>
-            <div className="flex items-center gap-3 mt-3 sm:mt-0">
-              <span className="flex h-3 w-3 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-              </span>
-              <span className="text-xs font-semibold text-emerald-400 bg-emerald-950/50 px-3 py-1 rounded-full border border-emerald-800">
-                Live Flight Radar Active
-              </span>
+
+            <div className="flex items-center gap-3 mt-2 sm:mt-0 text-xs">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                <span className="text-slate-300 font-mono">gRPC Port 50051: Online</span>
+              </div>
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-950/60 border border-cyan-800/50 text-cyan-300 font-mono">
+                <span>h3geo.org: gridDisk Active</span>
+              </div>
             </div>
           </header>
 
-          {/* Hero Context Flight Deck */}
-          <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-8 space-y-8">
-            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-900/60 via-indigo-900/50 to-slate-900 border border-slate-800 p-6 sm:p-8 shadow-2xl">
-              <div className="relative z-10 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-                <div className="md:col-span-2 space-y-3">
-                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 text-xs font-semibold uppercase tracking-wider">
-                    ✈️ Touchdown Detection Simulation
+          <main className="max-w-7xl mx-auto px-4 sm:px-6 mt-6">
+            
+            {/* Live Interactive Map and Route Control */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              
+              {/* Map Panel (7 cols) */}
+              <div className="lg:col-span-7 bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-2xl relative">
+                
+                {/* Map Toolbar */}
+                <div className="flex flex-wrap items-center justify-between pb-3 border-b border-slate-800 mb-3 gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base font-bold text-white flex items-center gap-1.5">
+                      🗺️ Kashmir Valley Map & Roads
+                    </span>
+                    <span className="text-xs bg-slate-800 px-2 py-0.5 rounded text-slate-400 border border-slate-700">
+                      12 Hubs
+                    </span>
                   </div>
-                  <h2 className="text-2xl sm:text-3xl font-extrabold text-white">
-                    Just Landed at {data ? data.airport : "Srinagar Airport (SXR)"}
+
+                  {/* Basemap & Neighbor Controls */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center bg-slate-950 rounded-lg p-0.5 border border-slate-800 text-xs">
+                      {Object.keys(MAP_LAYERS).map(k => (
+                        <button
+                          key={k}
+                          onClick={() => setMapStyle(k)}
+                          className={`px-2 py-1 rounded-md transition-all ${
+                            mapStyle === k ? 'bg-slate-800 text-emerald-400 font-bold' : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {k === 'streets' ? '🛣️ Roads' : (k === 'voyager' ? '🧭 Detailed' : '⛰️ Topo')}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={() => setShowNeighbors(!showNeighbors)}
+                      className={`text-xs px-2.5 py-1 rounded-lg border transition-all ${
+                        showNeighbors 
+                          ? 'bg-cyan-950/80 border-cyan-500/50 text-cyan-300 font-bold' 
+                          : 'bg-slate-950 border-slate-800 text-slate-500'
+                      }`}
+                      title="Toggle Uber H3 gridDisk / kRing neighbor cell exploration"
+                    >
+                      ⬡ Neighbors ({neighborRing === 1 ? 'k=1 (6)' : 'k=2 (18)'})
+                    </button>
+
+                    <button
+                      onClick={() => setNeighborRing(neighborRing === 1 ? 2 : 1)}
+                      className="text-xs px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:border-slate-700"
+                      title="Expand neighbor ring depth"
+                    >
+                      {neighborRing === 1 ? 'Ring: +1' : 'Ring: -1'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Leaflet Map Div */}
+                <div id="map-container" className="shadow-inner border border-slate-800"></div>
+
+                {/* H3 Neighbor Status Badge */}
+                {neighborData && showNeighbors && (
+                  <div className="mt-2.5 px-3 py-1.5 rounded-lg bg-cyan-950/40 border border-cyan-800/40 text-xs text-cyan-300 flex items-center justify-between">
+                    <span>
+                      <b>H3 Core gridDisk:</b> Displaying <b>{neighborData.total_hexagons} hexagonal cells</b> around target (res 7, k={neighborRing})
+                    </span>
+                    <span className="font-mono text-[11px] text-cyan-400">
+                      Center Cell: {neighborData.center_h3_cell}
+                    </span>
+                  </div>
+                )}
+
+                {/* Live Tracing Status Banner */}
+                {isTracing && (
+                  <div className="mt-3 p-3 rounded-xl bg-slate-800/90 border border-cyan-500/40 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xl animate-spin">🧭</span>
+                      <div>
+                        <div className="text-xs font-bold text-cyan-400 uppercase tracking-wider">Live Vehicle Tracing via gRPC Stream</div>
+                        <div className="text-sm text-slate-200">{traceStatus}</div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-base font-extrabold text-cyan-300 font-mono">{traceProgress}%</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Transit & Transport Selection Panel (5 cols) */}
+              <div className="lg:col-span-5 space-y-4">
+                
+                {/* Location Selectors */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                  <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider mb-4 flex items-center gap-2">
+                    <span>⚡</span> gRPC Multi-Modal Route Dispatcher
                   </h2>
-                  <p className="text-sm text-slate-300 max-w-xl">
-                    Our real-time guide monitors arrival terminal gates, benchmarks government taxi counters against surge scams, and ensures you reach your hotel securely.
-                  </p>
-                  {data && (
-                    <div className="inline-block mt-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-2">
-                      <span className="text-xs text-slate-400">Guaranteed Tourist Protection Savings:</span>
-                      <p className="text-lg font-bold text-emerald-400">Save up to {data.potential_fraud_savings} on airport transfers</p>
-                    </div>
-                  )}
-                </div>
 
-                <div className="bg-slate-950/70 p-5 rounded-2xl border border-slate-800 space-y-4">
-                  <div>
-                    <label className="text-xs font-semibold text-slate-400 uppercase">Tracked Arrival Hub</label>
-                    <select 
-                      value={city} 
-                      onChange={(e) => setCity(e.target.value)}
-                      className="w-full mt-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-medium focus:ring-2 focus:ring-emerald-500"
-                    >
-                      <option value="SXR">Srinagar (SXR) — Sheikh ul-Alam Intl</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-slate-400 uppercase">Target Destination</label>
-                    <select 
-                      value={destination} 
-                      onChange={(e) => setDestination(e.target.value)}
-                      className="w-full mt-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-medium focus:ring-2 focus:ring-emerald-500"
-                    >
-                      <option value="Dal Lake / Boulevard Road">Dal Lake / Boulevard Road (Houseboats)</option>
-                      <option value="Gulmarg Hill Resort">Gulmarg Hill Resort (Winter Skiing)</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Anti-Fraud Advisories (Tourist Shield) */}
-            <section className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                  🛡️ Active Airport & City Anti-Fraud Advisories
-                </h3>
-                <span className="text-xs text-amber-400 bg-amber-950/40 border border-amber-800 px-3 py-1 rounded-full font-semibold">
-                  Tourist Police Verified
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                {data?.anti_fraud_advisories?.map((rule) => (
-                  <div key={rule.id} className="bg-slate-950 border border-amber-500/20 rounded-2xl p-5 space-y-3 relative overflow-hidden shadow-lg">
-                    <div className="w-1.5 h-full bg-amber-500 absolute left-0 top-0"></div>
-                    <div className="flex justify-between items-start">
-                      <span className="text-xs font-bold uppercase text-amber-400 tracking-wider">Scam Alert</span>
-                      <span className="text-xs text-slate-400">SOS: 112</span>
-                    </div>
-                    <h4 className="font-bold text-white text-base">{rule.scam_title}</h4>
-                    <p className="text-xs text-slate-300 leading-relaxed">{rule.description}</p>
-                    <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 text-xs text-emerald-300 font-medium">
-                      <span className="font-bold text-emerald-400 block mb-1">✅ Safe Action:</span>
-                      {rule.prevention_guide}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {/* Fair-Fare Transit Benchmark Engine */}
-            <section className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                    🚖 Real-Time Transit & Cab Benchmark
-                  </h3>
-                  <p className="text-xs text-slate-400">Comparing regulated rates against surge & predatory tout pricing</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                {data?.transit_comparison?.map((option) => (
-                  <div 
-                    key={option.id} 
-                    className={`rounded-2xl p-5 border relative flex flex-col justify-between ${
-                      option.recommended 
-                        ? 'bg-slate-950 border-emerald-500/40 shadow-xl shadow-emerald-500/5 ring-1 ring-emerald-500/20' 
-                        : 'bg-red-950/20 border-red-500/30'
-                    }`}
-                  >
+                  <div className="space-y-3">
                     <div>
-                      <div className="flex justify-between items-center mb-2">
-                        <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
-                          option.recommended 
-                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
-                            : 'bg-red-500/20 text-red-300 border border-red-500/30'
-                        }`}>
-                          {option.recommended ? "★ RECOMMENDED SAFE OPTION" : "⚠️ HIGH SCAM RISK"}
-                        </span>
-                        <span className="text-xs text-slate-400">{option.travel_time_mins} mins</span>
-                      </div>
-                      
-                      <h4 className="font-bold text-lg text-white mt-1">{option.title}</h4>
-                      <div className="mt-3 flex items-baseline gap-2">
-                        <span className="text-2xl font-black text-white">₹{option.estimated_price_min} - ₹{option.estimated_price_max}</span>
-                        <span className="text-xs text-slate-400">fair fare estimate</span>
-                      </div>
-                      <p className="text-xs text-slate-300 mt-3 p-3 bg-slate-900 rounded-xl border border-slate-800">
-                        {option.advice}
-                      </p>
+                      <label className="text-xs text-slate-400 font-semibold mb-1 block">Pick Origin Hub</label>
+                      <select 
+                        value={originId} 
+                        onChange={(e) => setOriginId(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
+                      >
+                        {locations.map(loc => (
+                          <option key={'orig-' + loc.id} value={loc.id}>
+                            🛫 {loc.name} ({loc.category})
+                          </option>
+                        ))}
+                      </select>
                     </div>
 
-                    <div className="mt-5 pt-4 border-t border-slate-800 flex justify-between items-center text-xs">
-                      <span className="text-slate-400">Safety Rating: <strong className="text-amber-400 font-bold">★ {option.safety_rating}</strong></span>
-                      <button 
-                        onClick={() => alert(`Directions: Head towards ${option.title.includes('Prepaid') ? 'Arrival Hall Counter #2' : 'Designated Cab Bay'}`)}
-                        className={`px-4 py-2 rounded-xl font-bold transition-all ${
-                          option.recommended 
-                            ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950' 
-                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    <div>
+                      <label className="text-xs text-slate-400 font-semibold mb-1 block">Pick Destination (Tourist Spot)</label>
+                      <select 
+                        value={destId} 
+                        onChange={(e) => setDestId(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500"
+                      >
+                        {locations.map(loc => (
+                          <option key={'dest-' + loc.id} value={loc.id}>
+                            🎯 {loc.name} ({loc.category})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Mode Selector Buttons */}
+                  <div className="mt-4">
+                    <label className="text-xs text-slate-400 font-semibold mb-2 block">Choose Transport Mode</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {TRANSPORT_MODES.map(mode => (
+                        <button
+                          key={mode.id}
+                          onClick={() => setSelectedMode(mode.id)}
+                          className={`p-3 rounded-xl border text-left transition-all ${
+                            selectedMode === mode.id 
+                              ? 'bg-emerald-950/40 border-emerald-500 text-white shadow-lg shadow-emerald-950/50' 
+                              : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                          }`}
+                        >
+                          <div className="flex justify-between items-center">
+                            <span className="text-xl">{mode.icon}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">{mode.badge}</span>
+                          </div>
+                          <div className="text-xs font-bold mt-1.5">{mode.label}</div>
+                          <div className="text-[11px] text-slate-400 truncate">{mode.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Route Summary Box */}
+                  {routeData && (
+                    <div className="mt-5 p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                      <div className="flex justify-between items-baseline">
+                        <div>
+                          <div className="text-xs text-slate-400">Total Road Distance</div>
+                          <div className="text-2xl font-black text-white font-mono">{routeData.distance_km} <span className="text-sm font-normal text-slate-400">km</span></div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xs text-slate-400">Regulated Fair Fare</div>
+                          <div className="text-2xl font-black text-emerald-400 font-mono">
+                            ₹{selectedOption?.fare_min} - ₹{selectedOption?.fare_max}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800 text-xs">
+                        <div>
+                          <span className="text-slate-500 block">Est. Duration</span>
+                          <span className="font-bold text-slate-200">⏱️ ~{selectedOption?.duration_minutes} mins</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block">Uber H3 Hex Traversed</span>
+                          <span className="font-bold text-purple-400 font-mono">⬡ {routeData.h3_hexagons?.length || 0} cells</span>
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-xs">
+                        <div className="text-amber-400 font-semibold mb-0.5">💡 Driver Recommendation:</div>
+                        <div className="text-slate-300">{selectedOption?.recommendation}</div>
+                        <div className="text-slate-400 mt-1 text-[11px]"><b className="text-slate-300">Safety Tip:</b> {selectedOption?.safety_tip}</div>
+                      </div>
+
+                      {/* Start Live Trace Button */}
+                      <button
+                        onClick={startLiveTracing}
+                        disabled={isTracing}
+                        className={`w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg transition-all ${
+                          isTracing 
+                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
+                            : 'bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 hover:brightness-110 shadow-emerald-500/20'
                         }`}
                       >
-                        {option.recommended ? "Choose Safe Ride" : "Avoid"}
+                        <span>{isTracing ? '🛰️' : '🚀'}</span>
+                        <span>{isTracing ? 'Live Telemetry Active...' : `Trace Route Live (${selectedMode.replace('_', ' ').toUpperCase()})`}</span>
                       </button>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </section>
+                  )}
 
-            {/* Curated Accommodations & Room Allocation */}
-            <section className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                    🏨 Verified Accommodations & Direct Room Allocation
+                </div>
+
+                {/* Quick Location Pills */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                  <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Explore Popular Kashmir Spots</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {locations.map(loc => (
+                      <button
+                        key={'pill-' + loc.id}
+                        onClick={() => setDestId(loc.id)}
+                        className={`text-xs px-2.5 py-1 rounded-lg border transition-all ${
+                          destId === loc.id 
+                            ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 font-semibold' 
+                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                        }`}
+                      >
+                        {loc.name.split('(')[0]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+
+            {/* Anti Fraud Advisories Section */}
+            {arrivalBrief?.anti_fraud_advisories && (
+              <div className="mt-10">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                    🛡️ Official Anti-Fraud Advisories & Tout Shield
                   </h3>
-                  <p className="text-xs text-slate-400">All properties pre-verified for tourist safety, lake access, and direct reception check-in</p>
+                  <span className="text-xs text-emerald-400 bg-emerald-950/50 border border-emerald-800 px-3 py-1 rounded-full font-semibold">
+                    Saved Tourists Over {arrivalBrief.potential_fraud_savings}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {arrivalBrief.anti_fraud_advisories.map((rule, idx) => (
+                    <div key={'rule-' + idx} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 hover:border-slate-700 transition-all flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-bold px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/30 uppercase">
+                            Warning
+                          </span>
+                          <span className="text-[11px] text-slate-400 font-mono">Verified Police Rule</span>
+                        </div>
+                        <h4 className="font-bold text-white text-sm mb-2">{rule.scam_title}</h4>
+                        <p className="text-xs text-slate-400 mb-3">{rule.description}</p>
+                        <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs text-slate-300 mb-4">
+                          <b className="text-emerald-400">Official Safe Protocol:</b> {rule.prevention_guide}
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-slate-400 flex items-center justify-between pt-3 border-t border-slate-800/80">
+                        <span>Helpline:</span>
+                        <span className="text-emerald-400 font-bold">{rule.official_helpline}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
+            )}
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-                {data?.recommended_hotels?.map((hotel) => (
-                  <div key={hotel.id} className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-between hover:border-slate-700 transition-all shadow-lg group">
-                    <div>
-                      <div className="h-44 overflow-hidden relative">
-                        <img src={hotel.image_url} alt={hotel.name} className="w-full h-full object-cover group-hover:scale-105 transition-all duration-300" />
-                        <div className="absolute top-3 right-3 bg-slate-950/80 backdrop-blur-md px-2 py-1 rounded-lg text-xs font-bold text-amber-400 border border-slate-700">
+            {/* Curated Pre-Verified Stays */}
+            {arrivalBrief?.recommended_hotels && (
+              <div className="mt-10">
+                <h3 className="text-lg font-extrabold text-white mb-4 flex items-center gap-2">
+                  🏨 Pre-Verified Safe Stays & Houseboats (Direct Front Desk Sync)
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {arrivalBrief.recommended_hotels.map(hotel => (
+                    <div key={'hotel-' + hotel.id} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700 transition-all flex flex-col justify-between">
+                      <div className="h-40 overflow-hidden relative">
+                        <img src={hotel.image_url} alt={hotel.name} className="w-full h-full object-cover hover:scale-105 transition-all duration-300" />
+                        <span className="absolute top-2 right-2 text-xs font-bold bg-slate-900/90 text-amber-400 px-2 py-0.5 rounded-full border border-slate-700">
                           ★ {hotel.rating}
-                        </div>
-                        <div className="absolute bottom-3 left-3 bg-emerald-500/90 text-slate-950 text-[10px] font-black uppercase px-2 py-0.5 rounded shadow">
-                          Verified Safe Property
-                        </div>
+                        </span>
                       </div>
-                      
-                      <div className="p-4 space-y-2">
-                        <span className="text-[11px] font-semibold text-teal-400 uppercase tracking-wider">{hotel.category}</span>
-                        <h4 className="font-bold text-base text-white line-clamp-1">{hotel.name}</h4>
-                        <p className="text-xs text-slate-400 line-clamp-1">{hotel.locality}</p>
-                        <p className="text-[11px] text-slate-500 mt-2 line-clamp-2">{hotel.amenities}</p>
+                      <div className="p-4 flex-1 flex flex-col justify-between">
+                        <div>
+                          <div className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider mb-1">{hotel.category}</div>
+                          <h4 className="font-bold text-white text-sm mb-1">{hotel.name}</h4>
+                          <p className="text-xs text-slate-400 mb-2 truncate">{hotel.locality}</p>
+                          <p className="text-[11px] text-slate-500 line-clamp-2 mb-3">{hotel.amenities}</p>
+                        </div>
+                        <div>
+                          <div className="flex items-baseline justify-between pt-2 border-t border-slate-800 mb-3">
+                            <span className="text-xs text-slate-400">Per Night</span>
+                            <span className="text-base font-extrabold text-white font-mono">₹{hotel.price_per_night.toLocaleString()}</span>
+                          </div>
+                          <button
+                            onClick={() => setBookingModal(hotel)}
+                            className="w-full py-2 rounded-xl bg-slate-800 hover:bg-emerald-600 hover:text-white text-emerald-400 font-bold text-xs transition-all border border-emerald-500/30"
+                          >
+                            Book Verified Room
+                          </button>
+                        </div>
                       </div>
                     </div>
-
-                    <div className="p-4 pt-0 mt-3 flex justify-between items-center border-t border-slate-900">
-                      <div>
-                        <span className="text-lg font-black text-white">₹{hotel.price_per_night.toLocaleString()}</span>
-                        <span className="text-[10px] text-slate-400 block">/ night</span>
-                      </div>
-                      <button 
-                        onClick={() => setBookingModal(hotel)}
-                        className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-all shadow-lg shadow-blue-600/20"
-                      >
-                        Book Room
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </section>
+            )}
+
           </main>
 
           {/* Booking Modal */}
           {bookingModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-                <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                  <h3 className="font-bold text-lg text-white">Confirm Room Allocation</h3>
-                  <button onClick={() => setBookingModal(null)} className="text-slate-400 hover:text-white font-bold">&times;</button>
-                </div>
-                
-                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800">
-                  <span className="text-xs text-teal-400 font-semibold">{bookingModal.category}</span>
-                  <h4 className="font-bold text-white text-base">{bookingModal.name}</h4>
-                  <p className="text-xs text-slate-400">{bookingModal.locality}</p>
-                  <p className="text-sm font-bold text-emerald-400 mt-1">₹{bookingModal.price_per_night.toLocaleString()} / night</p>
-                </div>
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+                <button 
+                  onClick={() => setBookingModal(null)}
+                  className="absolute top-4 right-4 text-slate-400 hover:text-white text-lg font-bold"
+                >
+                  ✕
+                </button>
+                <div className="text-xs text-emerald-400 font-bold uppercase tracking-wider mb-1">Direct Verification Booking</div>
+                <h3 className="text-lg font-black text-white mb-2">{bookingModal.name}</h3>
+                <p className="text-xs text-slate-400 mb-4">{bookingModal.locality}</p>
 
                 <form onSubmit={handleBook} className="space-y-3">
                   <div>
-                    <label className="text-xs font-semibold text-slate-400">Guest Name</label>
+                    <label className="text-xs text-slate-400 font-semibold mb-1 block">Full Name</label>
                     <input 
                       type="text" 
-                      required 
+                      required
                       value={bookingForm.name} 
-                      onChange={(e) => setBookingForm({...bookingForm, name: e.target.value})}
-                      className="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500" 
+                      onChange={e => setBookingForm({...bookingForm, name: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white" 
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-slate-400">Contact Number</label>
+                    <label className="text-xs text-slate-400 font-semibold mb-1 block">Phone (for Room Key SMS)</label>
                     <input 
-                      type="tel" 
-                      required 
+                      type="text" 
+                      required
                       value={bookingForm.phone} 
-                      onChange={(e) => setBookingForm({...bookingForm, phone: e.target.value})}
-                      className="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500" 
+                      onChange={e => setBookingForm({...bookingForm, phone: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white" 
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="text-xs font-semibold text-slate-400">Check-in Date</label>
+                      <label className="text-xs text-slate-400 font-semibold mb-1 block">Check-in Date</label>
                       <input 
                         type="date" 
-                        required 
+                        required
                         value={bookingForm.date} 
-                        onChange={(e) => setBookingForm({...bookingForm, date: e.target.value})}
-                        className="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500" 
+                        onChange={e => setBookingForm({...bookingForm, date: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white" 
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-semibold text-slate-400">Nights</label>
+                      <label className="text-xs text-slate-400 font-semibold mb-1 block">Nights</label>
                       <input 
                         type="number" 
                         min="1" 
-                        max="14" 
-                        required 
+                        max="14"
                         value={bookingForm.nights} 
-                        onChange={(e) => setBookingForm({...bookingForm, nights: e.target.value})}
-                        className="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500" 
+                        onChange={e => setBookingForm({...bookingForm, nights: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white" 
                       />
                     </div>
                   </div>
 
-                  <div className="pt-2">
-                    <button type="submit" className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-extrabold text-sm transition-all shadow-lg shadow-emerald-500/20">
-                      Allocate & Confirm Booking
-                    </button>
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex justify-between items-center text-xs mt-4">
+                    <span className="text-slate-400">Total Price ({bookingForm.nights} nights):</span>
+                    <span className="text-base font-extrabold text-emerald-400 font-mono">
+                      ₹{(bookingModal.price_per_night * parseInt(bookingForm.nights || 1)).toLocaleString()}
+                    </span>
                   </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-sm transition-all mt-4"
+                  >
+                    Confirm Pre-Verified Room Booking
+                  </button>
                 </form>
               </div>
             </div>
           )}
 
-          {/* Success Modal */}
+          {/* Booking Success Confirmation */}
           {bookingSuccess && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-              <div className="bg-slate-950 border border-emerald-500/40 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl text-center">
-                <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto text-3xl">
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-emerald-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-center">
+                <div className="w-14 h-14 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-2xl mx-auto mb-4 border border-emerald-500/40">
                   ✓
                 </div>
-                <h3 className="text-xl font-bold text-white">Room Allocation Confirmed!</h3>
-                <p className="text-xs text-slate-300">
-                  Your reservation ID is <strong className="text-emerald-400 font-mono text-sm">{bookingSuccess.booking_id}</strong>
-                </p>
-                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 text-left text-xs space-y-1.5">
-                  <div className="flex justify-between"><span className="text-slate-400">Hotel:</span> <strong className="text-white">{bookingSuccess.hotel_name}</strong></div>
-                  <div className="flex justify-between"><span className="text-slate-400">Allocated Room:</span> <strong className="text-emerald-400 font-bold">{bookingSuccess.allocated_room_no}</strong></div>
-                  <div className="flex justify-between"><span className="text-slate-400">Guest:</span> <strong className="text-white">{bookingSuccess.guest_name}</strong></div>
-                  <div className="flex justify-between"><span className="text-slate-400">Total Billed:</span> <strong className="text-white">{bookingSuccess.total_amount}</strong></div>
-                  <div className="flex justify-between"><span className="text-slate-400">Assurance:</span> <span className="text-teal-400 font-medium">Direct Front Desk Sync</span></div>
+                <h3 className="text-xl font-black text-white mb-1">Booking Confirmed!</h3>
+                <p className="text-xs text-slate-400 mb-4">{bookingSuccess.safety_assurance}</p>
+
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-left space-y-2 text-xs mb-5">
+                  <div className="flex justify-between"><span className="text-slate-400">Booking ID:</span> <span className="font-mono font-bold text-white">{bookingSuccess.booking_id}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Property:</span> <span className="font-bold text-white">{bookingSuccess.hotel_name}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Room Allocated:</span> <span className="font-bold text-emerald-400 font-mono">{bookingSuccess.allocated_room_no}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Guest:</span> <span className="text-white">{bookingSuccess.guest_name}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Total Paid:</span> <span className="font-bold text-white">{bookingSuccess.total_amount}</span></div>
                 </div>
-                <button 
+
+                <button
                   onClick={() => setBookingSuccess(null)}
                   className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs"
                 >
@@ -396,11 +860,12 @@
               </div>
             </div>
           )}
+
         </div>
       );
     }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   </script>
 </body>
 </html>
